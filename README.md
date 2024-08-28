@@ -1,16 +1,14 @@
 # Bootstrap Commands
 
-A script that checks if certain commands are installed and if not installs them.
+A script to quickly install your favorite commands.
 
-You can look in [commands-common.sh](commands-common.sh) and adjust what commands should be evaluated.
+Commands are listed in [commands-common.sh](commands-common.sh). You can add or remove commands as needed.
+
+The script checks if a command is installed, and if not, gives you an option to install it.
 
 ## How to Run
 
 ```bash
 . ./bootstrap-commands.sh
 ```
->NOTE: To include the . in front of the script (to make env variables available)
-
-## Misc
-
-The commands is developed for Ubuntu (Debian) but could probably quite easily be modified for any Linux based OS.
+>ℹ️ This scripts was developed for Ubuntu (Debian) but can easily be modified for any Linux-based OS.
