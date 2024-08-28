@@ -9,14 +9,13 @@ commands+=("curl apt") # For making HTTP requests
 commands+=("git-all apt") # For version control, git with all dependencies
 
 # Web Browsing
-commands+=("chromium apt") # For browsing the web
-commands+=("google-chrome apt") # For browsing the web
+commands+=("chromium-browser apt") # For browsing the web
 
 # File Editing and Management
 commands+=("code snap") # For editing files
 commands+=("meld apt") # For comparing files
 commands+=("tree apt") # For displaying directories
-commands+=("rg apt") # For searching files
+commands+=("ripgrep apt") # For searching files
 commands+=("fzf apt") # For fuzzy finding
 
 # System Monitoring
