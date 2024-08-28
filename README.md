@@ -2,7 +2,7 @@
 
 A script that checks if certain commands are installed and if not installs them.
 
-You can look in [bootstrap-commands.sh](bootstrap-commands.sh) and adjust what commands should be evaluated.
+You can look in [commands-common.sh](commands-common.sh) and adjust what commands should be evaluated.
 
 ## How to Run
 
