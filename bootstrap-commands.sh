@@ -22,23 +22,24 @@ if [[ "$BASH_SOURCE" == "$0" ]]; then
 fi
 
 # Usage
-if [ $1 == "-h" ] || [ $1 == "--help" ]; then
-    print_usage
-    return 0
-fi
-
-# Check what commands file to use
-if [ $1 == "-f" ]; then
-    if [ ! -f $2 ]; then
-        echo "Commands file does not exist: $2"
-        return 1
-    else
-        COMMANDS_FILE=$2
+if [ $# -gt 0 ]; then
+    if [ $1 == "-h" ] || [ $1 == "--help" ]; then
+        print_usage
+        return 0
+    fi
+    # Check what commands file to use
+    if [ $1 == "-f" ]; then
+        if [ ! -f $2 ]; then
+            echo "Commands file does not exist: $2"
+            return 1
+        else
+            COMMANDS_FILE=$2
+        fi
     fi
 fi
 
 # Load the commands
-declare -A commands
+unset commands
 commands=()
 . $COMMANDS_FILE
 
@@ -64,7 +65,10 @@ function command_exists() {
     return $EXISTS
 }
 
-for command in "${!commands[@]}"; do
+for key in "${commands[@]}"; do
+    key_parts=($key)
+    command=${key_parts[0]}
+    installer=${key_parts[1]}
     if ! command_exists $command; then
         echo -en "\e[31m$command\e[0m is not installed, "
         # Ask the user if they want to install the command
@@ -72,11 +76,11 @@ for command in "${!commands[@]}"; do
         if [ $answer != "y" ]; then
             continue
         fi
-        if [ ${commands[$command]} == "apt" ]; then
+        if [ $installer == "apt" ]; then
           sudo apt install $command
-        elif [ ${commands[$command]} == "snap" ]; then
+        elif [ $installer == "snap" ]; then
           snap install --classic $command
-        elif [ ${commands[$command]} == "script" ]; then
+        elif [ $installer == "script" ]; then
             # Run the command install script
             install_script="install-scripts/install-$command.sh"
             if [ -f $install_script ]; then
