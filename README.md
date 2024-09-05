@@ -2,7 +2,7 @@
 
 A script to quickly install your favorite commands.
 
-Commands are listed in [commands-common.sh](commands-common.sh). You can add or remove commands as needed.
+Commands are listed in [commands-common.cfg](commands-common.cfg). You can add or remove commands as needed.
 
 The script checks if a command is installed, and if not, gives you an option to install it.
 
