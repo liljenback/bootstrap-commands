@@ -1,4 +1,4 @@
-# Bootstrap Commands
+# 🚀 Bootstrap Commands
 
 A script to quickly install your favorite commands.
 
