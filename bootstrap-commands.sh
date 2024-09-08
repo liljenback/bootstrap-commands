@@ -135,32 +135,57 @@ function command_is_installed() {
   return $EXISTS
 }
 
+install_command_with_installer() {
+  command=$1
+  installer=$2
+  if [ $installer == "apt" ]; then
+    sudo apt install $command || return 1
+  elif [ $installer == "snap" ]; then
+    snap install --classic $command || snap install $command || return 1
+  elif [ $installer == "dnf" ]; then
+    sudo dnf install $command || return 1
+  elif [ $installer == "yum" ]; then
+    sudo yum install $command || return 1
+  elif [ $installer == "pacman" ]; then
+    sudo pacman -S $command || return 1
+  elif [ $installer == "brew" ]; then
+    brew install $command || return 1
+  elif [ $installer == "script" ]; then
+    # Run the command install script
+    install_script="install-scripts/install-$command.sh"
+    if [ -f $install_script ]; then
+      ./$install_script && return
+    else
+      echo "Missing install script: $install_script"
+      return 1
+    fi
+  fi
+}
+
 install_command() {
-  if command_is_installed $1; then
+  local command=$1
+  if command_is_installed $command; then
     return
   fi
-  # TODO: Default package manager should be determined by the script
-  installer=$(get_command_value $1 "installer" "apt")
-  dependencies=$(get_command_value $1 "dependencies" "")
+  # First install dependencies
+  local dependencies=$(get_command_value $command "dependencies" "")
   if [ ! -z "$dependencies" ]; then
-    echo "Installing dependencies for $1"
+    echo "Installing dependencies for $command"
     for dependency in $dependencies; do
       install_command $dependency
     done
   fi
-  if [ $installer == "apt" ]; then
-    sudo apt install $1
-  elif [ $installer == "snap" ]; then
-    snap install --classic $1
-  elif [ $installer == "script" ]; then
-    # Run the command install script
-    install_script="install-scripts/install-$1.sh"
-    if [ -f $install_script ]; then
-      ./$install_script
-    else
-      echo "Missing install script: $install_script"
-    fi
+  # Check if the command has a specific installer
+  # If not, try to install with the available package managers
+  local installer=$(get_command_value $command "installer")
+  if [ -z "$installer" ]; then
+    for manager in "${available_package_managers[@]}"; do
+      echo "Trying to install $command with $manager"
+      install_command_with_installer $command $manager && return
+    done
   fi
+  install_command_with_installer $command $installer && return
+  echo "Failed to install $command with the available install options"
 }
 
 install_commands() {
@@ -178,6 +203,26 @@ install_commands() {
     fi
   done
 }
+
+available_package_managers=()
+
+# Function to detect available package manager(s)
+detect_package_managers() {
+    local managers=("apt" "snap" "dnf" "yum" "pacman" "brew")
+
+    for manager in "${managers[@]}"; do
+        if command -v $manager &> /dev/null; then
+            available_package_managers+=($manager)
+        fi
+    done
+
+    if [ ${#available_package_managers[@]} -eq 0 ]; then
+        echo "No supported package manager found."
+    fi
+}
+
+# Run the function
+detect_package_managers
 
 # Load the commands
 read_config $COMMANDS_FILE
