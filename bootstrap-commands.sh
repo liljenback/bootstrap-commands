@@ -8,6 +8,7 @@
 
 DEFAULT_COMMANDS_FILE="commands-common.cfg"
 COMMANDS_FILE=$DEFAULT_COMMANDS_FILE
+MINIMUM_BASH_VERSION=4
 
 unset commands
 declare -A commands
@@ -23,6 +24,12 @@ if [[ "$BASH_SOURCE" == "$0" ]]; then
   echo "This script must be sourced, run like this: . ./bootstrap-commands.sh"
   print_usage
   exit 1
+fi
+
+# Require bash version 4 or higher
+if [ "${BASH_VERSINFO[0]}" -lt $MINIMUM_BASH_VERSION ]; then
+  echo "This script requires bash version $MINIMUM_BASH_VERSION or higher"
+  return 1
 fi
 
 # Usage
@@ -56,7 +63,7 @@ trim_comment() {
 #   $1 - The name of the configuration file to read.
 #   $2 - The name of the associative array to populate with the configuration data.
 # Usage: read_config <file_name> <config_array>
-# Example: 
+# Example:
 #   declare -A my_config
 #   read_config "config.ini" my_config
 #   echo "${my_config[section][key]}"
@@ -226,17 +233,17 @@ install_commands() {
 
 # Function to detect available package manager(s)
 detect_package_managers() {
-    local managers=("apt" "snap" "dnf" "yum" "pacman" "brew")
+  local managers=("apt" "snap" "dnf" "yum" "pacman" "brew")
 
-    for manager in "${managers[@]}"; do
-        if command -v $manager &> /dev/null; then
-            available_package_managers+=($manager)
-        fi
-    done
-
-    if [ ${#available_package_managers[@]} -eq 0 ]; then
-        echo "No supported package manager found."
+  for manager in "${managers[@]}"; do
+    if command -v $manager &>/dev/null; then
+      available_package_managers+=($manager)
     fi
+  done
+
+  if [ ${#available_package_managers[@]} -eq 0 ]; then
+    echo "No supported package manager found."
+  fi
 }
 
 detect_package_managers
