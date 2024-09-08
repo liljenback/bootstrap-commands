@@ -12,7 +12,10 @@ MINIMUM_BASH_VERSION=4
 
 unset commands
 declare -A commands
+unset available_package_managers
 available_package_managers=()
+unset commands_package_map
+declare -A commands_package_map
 
 function print_usage() {
   echo "Usage: . ./bootstrap-commands.sh [-f file]"
@@ -121,7 +124,7 @@ output_config() {
   declare -n config=$1
   for section in "${!config[@]}"; do
     echo "[$section]"
-    eval "declare -A tmp_array=(${config[$section]})"
+    eval "local -A tmp_array=(${config[$section]})"
     for key in "${!tmp_array[@]}"; do
       echo "  $key=${tmp_array[$key]}"
     done
@@ -133,7 +136,7 @@ get_section_value() {
   local section_name=$2
   local key=$3
   local default_value=$4
-  eval "declare -A tmp_array=(${config[$section_name]})"
+  eval "local -A tmp_array=(${config[$section_name]})"
   [ -z "${tmp_array[$key]}" ] && echo $default_value || echo ${tmp_array[$key]}
 }
 
@@ -141,11 +144,11 @@ function command_is_installed() {
   local command_name=$1
   EXISTS=1
   # Check if the command exists with dpkg and make sure it's not listed ad deinstalled
-  if dpkg -s $command_name &>/dev/null && ! dpkg -s $command_name | grep -q "deinstall"; then
+  if dpkg -s $(get_section_value commands_package_map $command_name "apt" $command_name) &>/dev/null && ! dpkg -s $(get_section_value commands_package_map $command_name "apt" $command_name) | grep -q "deinstall"; then
     EXISTS=0
-  elif snap list $command_name &>/dev/null; then
+  elif snap list $(get_section_value commands_package_map $command_name "snap" $command_name) &>/dev/null; then
     EXISTS=0
-  elif brew list $command_name &>/dev/null; then
+  elif brew list $(get_section_value commands_package_map $command_name "brew" $command_name) &>/dev/null; then
     EXISTS=0
   elif command -v $command_name &>/dev/null; then
     EXISTS=0
@@ -165,7 +168,14 @@ function command_is_installed() {
 
 install_command_with_installer() {
   local command_name=$1
+  # Check if the command name is different for this particular installer
   local installer=$2
+  local alternate_command_name=$(get_section_value commands_package_map $command_name $installer "")
+  if [ ! -z "$alternate_command_name" ]; then
+    echo "Using alternate command name: $alternate_command_name"
+    command_name=$alternate_command_name
+  fi
+
   if [ $installer == "apt" ]; then
     sudo apt install $command_name || return 1
   elif [ $installer == "snap" ]; then
@@ -177,7 +187,7 @@ install_command_with_installer() {
   elif [ $installer == "pacman" ]; then
     sudo pacman -S $command_name || return 1
   elif [ $installer == "brew" ]; then
-    brew install $command_name || return 1
+    brew install $command_name || brew cask install $command_name || return 1
   elif [ $installer == "script" ]; then
     install_script="install-scripts/install-$command_name.sh"
     if [ -f $install_script ]; then
@@ -233,7 +243,7 @@ install_commands() {
 
 # Function to detect available package manager(s)
 detect_package_managers() {
-  local managers=("apt" "snap" "dnf" "yum" "pacman" "brew")
+  local managers=("apt" "snap" "yum" "dnf" "pacman" "brew")
 
   for manager in "${managers[@]}"; do
     if command -v $manager &>/dev/null; then
@@ -251,5 +261,7 @@ detect_package_managers
 # Load the commands
 read_config $COMMANDS_FILE commands
 # output_config commands
+read_config "commands-package-map.cfg" commands_package_map
+# output_config commands_package_map
 
 install_commands
