@@ -9,6 +9,10 @@
 DEFAULT_COMMANDS_FILE="commands-common.cfg"
 COMMANDS_FILE=$DEFAULT_COMMANDS_FILE
 
+unset commands
+declare -A commands
+available_package_managers=()
+
 function print_usage() {
   echo "Usage: . ./bootstrap-commands.sh [-f file]"
   echo "Options:"
@@ -46,25 +50,22 @@ trim_comment() {
   echo "${1%%#*}"
 }
 
-unset commands
-declare -A commands
-
-# Temporary variables
-current_command=""
-declare -A command_fields
-
-save_command() {
-  if [ ! -z "$current_command" ]; then
-    # Serialize the key-value pairs and store them in the commands array
-    command_string=""
-    for key in "${!command_fields[@]}"; do
-      command_string+="[$key]=${command_fields[$key]} "
-    done
-    commands[$current_command]="$command_string"
-  fi
-}
-
+# Function: read_config
+# Description: Reads a configuration file and populates an associative array with the parsed data.
+# Parameters:
+#   $1 - The name of the configuration file to read.
+#   $2 - The name of the associative array to populate with the configuration data.
+# Usage: read_config <file_name> <config_array>
+# Example: 
+#   declare -A my_config
+#   read_config "config.ini" my_config
+#   echo "${my_config[section][key]}"
 read_config() {
+  local file_name=$1
+  declare -n config=$2
+  local current_section=""
+  local section_string=""
+  local -A section_fields
   while read -r line; do
 
     # Remove leading/trailing whitespace
@@ -76,9 +77,16 @@ read_config() {
     [[ $line =~ ^# ]] && continue
 
     if [[ $line =~ ^\[(.*)\]$ ]]; then
-      save_command
-      current_command="${BASH_REMATCH[1]}"
-      command_fields=()
+      # Save the previous section
+      if [ ! -z "$current_section" ]; then
+        section_string=""
+        for key in "${!section_fields[@]}"; do
+          section_string+="[$key]=${section_fields[$key]} "
+        done
+        config[$current_section]="$section_string"
+      fi
+      current_section="${BASH_REMATCH[1]}"
+      section_fields=()
       continue
     fi
 
@@ -86,42 +94,55 @@ read_config() {
     if [[ $line =~ ^([^=]+)=[[:space:]]*(.*)$ ]]; then
       key=$(trim_whitespace "${BASH_REMATCH[1]}")
       value=$(trim_whitespace "${BASH_REMATCH[2]}")
-      command_fields["$key"]="$value"
+      section_fields["$key"]="$value"
     fi
 
-  done <$1
+  done <$file_name
 
-  # Save last command read
-  save_command
+  # Save last section read
+  # TODO: Refactor this to a function
+  if [ ! -z "$current_section" ]; then
+    section_string=""
+    for key in "${!section_fields[@]}"; do
+      section_string+="[$key]=${section_fields[$key]} "
+    done
+    config[$current_section]="$section_string"
+  fi
 }
 
 output_config() {
-  for command in "${!commands[@]}"; do
-    eval "declare -A tmp_array=(${commands[$command]})"
+  declare -n config=$1
+  for section in "${!config[@]}"; do
+    echo "[$section]"
+    eval "declare -A tmp_array=(${config[$section]})"
     for key in "${!tmp_array[@]}"; do
-      echo "  $key: ${tmp_array[$key]}"
+      echo "  $key=${tmp_array[$key]}"
     done
   done
 }
 
-get_command_value() {
-  command_name=$1
-  key=$2
-  default_value=$3
-  eval "declare -A tmp_array=(${commands[$command_name]})"
+get_section_value() {
+  declare -n config=$1
+  local section_name=$2
+  local key=$3
+  local default_value=$4
+  eval "declare -A tmp_array=(${config[$section_name]})"
   [ -z "${tmp_array[$key]}" ] && echo $default_value || echo ${tmp_array[$key]}
 }
 
 function command_is_installed() {
+  local command_name=$1
   EXISTS=1
   # Check if the command exists with dpkg and make sure it's not listed ad deinstalled
-  if dpkg -s $1 &>/dev/null && ! dpkg -s $1 | grep -q "deinstall"; then
+  if dpkg -s $command_name &>/dev/null && ! dpkg -s $command_name | grep -q "deinstall"; then
     EXISTS=0
-  elif snap list $1 &>/dev/null; then
+  elif snap list $command_name &>/dev/null; then
     EXISTS=0
-  elif command -v $1 &>/dev/null; then
+  elif brew list $command_name &>/dev/null; then
     EXISTS=0
-  elif which $1 &>/dev/null; then
+  elif command -v $command_name &>/dev/null; then
+    EXISTS=0
+  elif which $command_name &>/dev/null; then
     EXISTS=0
   # elif [ -f "/usr/local/bin/$1" ]; then
   #     EXISTS=0
@@ -136,23 +157,22 @@ function command_is_installed() {
 }
 
 install_command_with_installer() {
-  command=$1
-  installer=$2
+  local command_name=$1
+  local installer=$2
   if [ $installer == "apt" ]; then
-    sudo apt install $command || return 1
+    sudo apt install $command_name || return 1
   elif [ $installer == "snap" ]; then
-    snap install --classic $command || snap install $command || return 1
+    snap install --classic $command_name || snap install $command_name || return 1
   elif [ $installer == "dnf" ]; then
-    sudo dnf install $command || return 1
+    sudo dnf install $command_name || return 1
   elif [ $installer == "yum" ]; then
-    sudo yum install $command || return 1
+    sudo yum install $command_name || return 1
   elif [ $installer == "pacman" ]; then
-    sudo pacman -S $command || return 1
+    sudo pacman -S $command_name || return 1
   elif [ $installer == "brew" ]; then
-    brew install $command || return 1
+    brew install $command_name || return 1
   elif [ $installer == "script" ]; then
-    # Run the command install script
-    install_script="install-scripts/install-$command.sh"
+    install_script="install-scripts/install-$command_name.sh"
     if [ -f $install_script ]; then
       ./$install_script && return
     else
@@ -168,7 +188,7 @@ install_command() {
     return
   fi
   # First install dependencies
-  local dependencies=$(get_command_value $command "dependencies" "")
+  local dependencies=$(get_section_value "commands" $command "dependencies" "")
   if [ ! -z "$dependencies" ]; then
     echo "Installing dependencies for $command"
     for dependency in $dependencies; do
@@ -177,7 +197,7 @@ install_command() {
   fi
   # Check if the command has a specific installer
   # If not, try to install with the available package managers
-  local installer=$(get_command_value $command "installer")
+  local installer=$(get_section_value "commands" $command "installer")
   if [ -z "$installer" ]; then
     for manager in "${available_package_managers[@]}"; do
       echo "Trying to install $command with $manager"
@@ -204,8 +224,6 @@ install_commands() {
   done
 }
 
-available_package_managers=()
-
 # Function to detect available package manager(s)
 detect_package_managers() {
     local managers=("apt" "snap" "dnf" "yum" "pacman" "brew")
@@ -221,13 +239,10 @@ detect_package_managers() {
     fi
 }
 
-# Run the function
 detect_package_managers
 
 # Load the commands
-read_config $COMMANDS_FILE
-
-# Output the parsed commands
-# output_config
+read_config $COMMANDS_FILE commands
+# output_config commands
 
 install_commands
