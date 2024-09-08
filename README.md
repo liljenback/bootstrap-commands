@@ -11,6 +11,6 @@ The script will check if each command is installed, and if not, give you the opt
 ```bash
 . ./bootstrap-commands.sh
 ```
->ℹ️ This scripts was mainly developed for [Ubuntu][ubuntu] (Debian) but can easily be modified to run on any Linux-based OS.
+>ℹ️ This script has been tested on [Ubuntu][ubuntu] (Debian) but should run on any Linux-based OS.
 
 [ubuntu]: https://ubuntu.com/desktop
