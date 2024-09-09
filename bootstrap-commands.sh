@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 
 # A bash script that checks if commands are installed and if not attempts to install
 # them with a package manager or a script.
@@ -9,6 +9,13 @@
 DEFAULT_COMMANDS_FILE="commands-common.cfg"
 COMMANDS_FILE=$DEFAULT_COMMANDS_FILE
 MINIMUM_BASH_VERSION=4
+
+# Require bash version 4 or higher
+if [ "${BASH_VERSINFO[0]}" -lt $MINIMUM_BASH_VERSION ]; then
+  echo "This script requires bash version $MINIMUM_BASH_VERSION or higher"
+  echo "Install a newer version of bash with your package manager."
+  return 1
+fi
 
 unset commands
 declare -A commands
@@ -27,12 +34,6 @@ if [[ "$BASH_SOURCE" == "$0" ]]; then
   echo "This script must be sourced, run like this: . ./bootstrap-commands.sh"
   print_usage
   exit 1
-fi
-
-# Require bash version 4 or higher
-if [ "${BASH_VERSINFO[0]}" -lt $MINIMUM_BASH_VERSION ]; then
-  echo "This script requires bash version $MINIMUM_BASH_VERSION or higher"
-  return 1
 fi
 
 # Usage
@@ -187,7 +188,7 @@ install_command_with_installer() {
   elif [ $installer == "pacman" ]; then
     sudo pacman -S $command_name || return 1
   elif [ $installer == "brew" ]; then
-    brew install $command_name || brew cask install $command_name || return 1
+    brew install $command_name || brew cask install $command_name --no-quarantine || return 1
   elif [ $installer == "script" ]; then
     install_script="install-scripts/install-$command_name.sh"
     if [ -f $install_script ]; then
@@ -243,7 +244,7 @@ install_commands() {
 
 # Function to detect available package manager(s)
 detect_package_managers() {
-  local managers=("apt" "snap" "yum" "dnf" "pacman" "brew")
+  local managers=("brew" "apt" "snap" "yum" "dnf" "pacman")
 
   for manager in "${managers[@]}"; do
     if command -v $manager &>/dev/null; then
