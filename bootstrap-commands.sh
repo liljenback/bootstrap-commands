@@ -188,7 +188,7 @@ install_command_with_installer() {
   elif [ $installer == "pacman" ]; then
     sudo pacman -S $command_name || return 1
   elif [ $installer == "brew" ]; then
-    brew install $command_name || brew cask install $command_name --no-quarantine || return 1
+    brew install $command_name --no-quarantine || brew install --cask --no-quarantine $command_name || return 1
   elif [ $installer == "script" ]; then
     install_script="install-scripts/install-$command_name.sh"
     if [ -f $install_script ]; then
@@ -244,10 +244,14 @@ install_commands() {
 
 # Function to detect available package manager(s)
 detect_package_managers() {
-  local managers=("brew" "apt" "snap" "yum" "dnf" "pacman")
+  local managers=("apt" "snap" "yum" "dnf" "pacman" "brew")
 
   for manager in "${managers[@]}"; do
     if command -v $manager &>/dev/null; then
+      # Extra check for apt (because some other bogus apt shows up sometimes on macOS)
+      if [ $manager == "apt" ] && [ ! -f "/etc/apt/sources.list" ]; then
+        continue
+      fi
       available_package_managers+=($manager)
     fi
   done
