@@ -1,160 +1,162 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
-# A bash script that checks if commands are installed and if not attempts to install
-# them with a package manager or a script.
-# Run this script like this: `. ./bootstrap-commands.sh`
-# The dot at the beginning of the command is important because it runs the script in the current shell
-# and not in a subshell so that the any environment variables are accessible.
+# A script that checks if commands are installed and if not attempts to
+# install them with a package manager or a script.
 
+SCRIPT_FILE="bootstrap-commands.sh"
 DEFAULT_COMMANDS_FILE="commands-common.cfg"
-COMMANDS_FILE=$DEFAULT_COMMANDS_FILE
-MINIMUM_BASH_VERSION=4
+COMMANDS_FILE="$DEFAULT_COMMANDS_FILE"
 
-# Require bash version 4 or higher
-if [ "${BASH_VERSINFO[0]}" -lt $MINIMUM_BASH_VERSION ]; then
-  echo "This script requires bash version $MINIMUM_BASH_VERSION or higher"
-  echo "Install a newer version of bash with your package manager."
-  return 1
-fi
-
-unset commands
-declare -A commands
-unset available_package_managers
-available_package_managers=()
-unset commands_package_map
-declare -A commands_package_map
-
-function print_usage() {
-  echo "Usage: . ./bootstrap-commands.sh [-f file]"
+print_usage() {
+  echo "Usage: . ./$SCRIPT_FILE [-f file]"
   echo "Options:"
-  echo "  -f file  Install commands from file (default: commands-common.cfg)"
+  echo "  -f file  Install commands from file (default: $DEFAULT_COMMANDS_FILE)"
 }
 
-if [[ "$BASH_SOURCE" == "$0" ]]; then
-  echo "This script must be sourced, run like this: . ./bootstrap-commands.sh"
-  print_usage
-  exit 1
-fi
-
-# Usage
+# Check for command line arguments
 if [ $# -gt 0 ]; then
-  if [ $1 == "-h" ] || [ $1 == "--help" ]; then
+  if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     print_usage
-    return 0
+    exit 0
   fi
-  # Check what commands file to use
-  if [ $1 == "-f" ]; then
-    if [ ! -f $2 ]; then
-      echo "Commands file does not exist: $2"
-      return 1
+  # Check what commands configuration file to use
+  if [ "$1" = "-f" ]; then
+    if [ "$#" -lt 2 ]; then
+      echo "Error: Missing argument for -f option."
+      exit 1
+    fi
+    if [ ! -f "$2" ]; then
+      echo "Commands configuration file does not exist: $2"
+      exit 1
     else
-      COMMANDS_FILE=$2
+      COMMANDS_FILE="$2"
     fi
   fi
 fi
 
-trim_whitespace() {
-  echo "$1" | xargs
+# Function to detect available package manager(s)
+detect_package_managers() {
+  available_package_managers=""
+  managers="apt snap yum dnf pacman brew"
+  for manager in $managers; do
+    if command -v "$manager" >/dev/null 2>&1; then
+      # Extra check for apt (because some other bogus apt shows up sometimes on macOS)
+      if [ "$manager" = "apt" ] && [ ! -f "/etc/apt/sources.list" ]; then
+        continue
+      fi
+      available_package_managers="$available_package_managers $manager"
+    fi
+  done
+  if [ -z "$available_package_managers" ]; then
+    echo "No supported package manager found."
+  fi
 }
 
+# Helper function to remove leading and trailing whitespace
+# This function is POSIX-compliant
+trim_whitespace() {
+  echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# Helper function to remove comments from lines
 trim_comment() {
-  echo "${1%%#*}"
+  echo "$1" | sed 's/[[:space:]]*#.*//'
 }
 
 # Function: read_config
-# Description: Reads a configuration file and populates an associative array with the parsed data.
+# Description: Reads a configuration file and populates shell variables
+# with the parsed data.
 # Parameters:
 #   $1 - The name of the configuration file to read.
-#   $2 - The name of the associative array to populate with the configuration data.
+#   $2 - The name of the configuration.
 # Usage: read_config <file_name> <config_array>
 # Example:
-#   declare -A my_config
-#   read_config "config.ini" my_config
-#   echo "${my_config[section][key]}"
+#   read_config "config.cfg" "my_config"
 read_config() {
-  local file_name=$1
-  declare -n config=$2
-  local current_section=""
-  local section_string=""
-  local -A section_fields
-  while read -r line; do
+  file_name="$1"
+  config_name="$2"
 
-    # Remove leading/trailing whitespace
+  current_section=""
+  # Store all encountered sections in a variable
+  eval config_name_sections="${config_name}_sections"
+  
+  while IFS= read -r line; do
+    # Remove comments and whitespace
     line=$(trim_comment "$line")
     line=$(trim_whitespace "$line")
 
-    # Skip empty lines or comments
+    # Skip empty lines
     [ -z "$line" ] && continue
-    [[ $line =~ ^# ]] && continue
 
-    if [[ $line =~ ^\[(.*)\]$ ]]; then
-      # Save the previous section
-      if [ ! -z "$current_section" ]; then
-        section_string=""
-        for key in "${!section_fields[@]}"; do
-          section_string+="[$key]=${section_fields[$key]} "
-        done
-        config[$current_section]="$section_string"
-      fi
-      current_section="${BASH_REMATCH[1]}"
-      section_fields=()
-      continue
-    fi
+    case "$line" in
+      \[*\])
+        current_section=$(echo "$line" | sed 's/^\[\(.*\)\]$/\1/')
+        eval "${config_name_sections}=\"\${${config_name_sections}} $current_section\""
+        ;;
+      *=*)
 
-    # Check if the line contains a key-value pair
-    if [[ $line =~ ^([^=]+)=[[:space:]]*(.*)$ ]]; then
-      key=$(trim_whitespace "${BASH_REMATCH[1]}")
-      value=$(trim_whitespace "${BASH_REMATCH[2]}")
-      section_fields["$key"]="$value"
-    fi
+        # Split the line into key and value
+        key=$(echo "$line" | cut -d= -f1)
+        value=$(echo "$line" | cut -d= -f2-)
+        key=$(trim_whitespace "$key")
+        value=$(trim_whitespace "$value")
 
-  done <$file_name
+        escaped_section=$(echo "$current_section" | sed 's/[^a-zA-Z0-9_]/_/g')
 
-  # Save last section read
-  # TODO: Refactor this to a function
-  if [ ! -z "$current_section" ]; then
-    section_string=""
-    for key in "${!section_fields[@]}"; do
-      section_string+="[$key]=${section_fields[$key]} "
-    done
-    config[$current_section]="$section_string"
+        # Store the key-value in a shell variable
+        eval "${config_name}_${escaped_section}_${key}=\"$value\""
+        ;;
+    esac
+  done < "$file_name"
+}
+
+# Function: get_section_value
+# Description: Retrieves a value from the parsed configuration data.
+# Parameters:
+#   $1 - The name of the configuration.
+#   $2 - The section name.
+#   $3 - The key name.
+#   $4 - The default value to return if the key is not found.
+# Usage: get_section_value <config_array> <section> <key> <default_value>
+# Example:
+#   value=$(get_section_value my_config "section" "key" "default
+get_section_value() {
+  config_name="$1"
+  section="$2"
+  # Escape section name to avoid issues with special characters
+  section=$(echo "$section" | sed 's/[^a-zA-Z0-9_]/_/g')
+  key="$3"
+  default_value="$4"
+  eval "value=\$${config_name}_${section}_${key}"
+  if [ -z "$value" ]; then
+    echo "$default_value"
+  else
+    echo "$value"
   fi
 }
 
-output_config() {
-  declare -n config=$1
-  for section in "${!config[@]}"; do
-    echo "[$section]"
-    eval "local -A tmp_array=(${config[$section]})"
-    for key in "${!tmp_array[@]}"; do
-      echo "  $key=${tmp_array[$key]}"
-    done
-  done
-}
-
-get_section_value() {
-  declare -n config=$1
-  local section_name=$2
-  local key=$3
-  local default_value=$4
-  eval "local -A tmp_array=(${config[$section_name]})"
-  [ -z "${tmp_array[$key]}" ] && echo $default_value || echo ${tmp_array[$key]}
-}
-
-function command_is_installed() {
-  local command_name=$1
+command_is_installed() {
+  command_name=$1
   EXISTS=1
-  # Check if the command exists with dpkg and make sure it's not listed ad deinstalled
-  if dpkg -s $(get_section_value commands_package_map $command_name "apt" $command_name) &>/dev/null && ! dpkg -s $(get_section_value commands_package_map $command_name "apt" $command_name) | grep -q "deinstall"; then
+  # Check if the command exists with dpkg and make sure it's not listed as just deinstalled
+  if dpkg -s $(get_section_value commands_package_map "$command_name" "apt" "$command_name") >/dev/null 2>&1 && \
+     ! dpkg -s $(get_section_value commands_package_map $command_name "apt" $command_name) | grep -q "deinstall"; then
     EXISTS=0
-  elif snap list $(get_section_value commands_package_map $command_name "snap" $command_name) &>/dev/null; then
+  elif snap list $(get_section_value commands_package_map "$command_name" "snap" "$command_name") >/dev/null 2>&1; then
     EXISTS=0
-  elif brew list $(get_section_value commands_package_map $command_name "brew" $command_name) &>/dev/null; then
+  elif brew list $(get_section_value commands_package_map "$command_name" "brew" "$command_name") >/dev/null 2>&1; then
     EXISTS=0
-  elif command -v $command_name &>/dev/null; then
+  elif command -v "$command_name" >/dev/null 2>&1; then
     EXISTS=0
-  elif which $command_name &>/dev/null; then
-    EXISTS=0
+  elif [ "script" = $(get_section_value commands "$command_name" "installer" "") ]; then
+    # Commands installed with a script can have a check script to verify the installation
+    check_script="install-scripts/check-$command_name.sh"
+    if [ -f "$check_script" ]; then
+      ./"$check_script"
+      if [ $? -eq 0 ]; then
+        EXISTS=0
+      fi
+    fi
   # elif [ -f "/usr/local/bin/$1" ]; then
   #     EXISTS=0
   # elif [ -f "/usr/bin/$1" ]; then
@@ -164,35 +166,36 @@ function command_is_installed() {
   # elif [ -f "/snap/bin/$1" ]; then
   #     EXISTS=0
   fi
-  return $EXISTS
+  return "$EXISTS"
 }
 
 install_command_with_installer() {
-  local command_name=$1
+  command_name=$1
+  installer=$2
+
   # Check if the command name is different for this particular installer
-  local installer=$2
-  local alternate_command_name=$(get_section_value commands_package_map $command_name $installer "")
-  if [ ! -z "$alternate_command_name" ]; then
+  alternate_command_name=$(get_section_value commands_package_map "$command_name" "$installer" "")
+  if [ -n "$alternate_command_name" ]; then
     echo "Using alternate command name: $alternate_command_name"
     command_name=$alternate_command_name
   fi
 
-  if [ $installer == "apt" ]; then
-    sudo apt install $command_name || return 1
-  elif [ $installer == "snap" ]; then
-    snap install --classic $command_name || snap install $command_name || return 1
-  elif [ $installer == "dnf" ]; then
-    sudo dnf install $command_name || return 1
-  elif [ $installer == "yum" ]; then
-    sudo yum install $command_name || return 1
-  elif [ $installer == "pacman" ]; then
-    sudo pacman -S $command_name || return 1
-  elif [ $installer == "brew" ]; then
-    brew install $command_name --no-quarantine || brew install --cask --no-quarantine $command_name || return 1
-  elif [ $installer == "script" ]; then
+  if [ "$installer" = "apt" ]; then
+    sudo apt install "$command_name" || return 1
+  elif [ "$installer" = "snap" ]; then
+    snap install --classic "$command_name" || snap install "$command_name" || return 1
+  elif [ "$installer" = "dnf" ]; then
+    sudo dnf install "$command_name" || return 1
+  elif [ "$installer" = "yum" ]; then
+    sudo yum install "$command_name" || return 1
+  elif [ "$installer" = "pacman" ]; then
+    sudo pacman -S "$command_name" || return 1
+  elif [ "$installer" = "brew" ]; then
+    brew install "$command_name" --no-quarantine || brew install --cask --no-quarantine "$command_name" || return 1
+  elif [ "$installer" = "script" ]; then
     install_script="install-scripts/install-$command_name.sh"
-    if [ -f $install_script ]; then
-      ./$install_script && return
+    if [ -f "$install_script" ]; then
+      ./"$install_script" && return 0
     else
       echo "Missing install script: $install_script"
       return 1
@@ -201,72 +204,65 @@ install_command_with_installer() {
 }
 
 install_command() {
-  local command=$1
-  if command_is_installed $command; then
+  command="$1"
+  if command_is_installed "$command"; then
     return
   fi
+
   # First install dependencies
-  local dependencies=$(get_section_value "commands" $command "dependencies" "")
-  if [ ! -z "$dependencies" ]; then
+  dependencies=$(get_section_value "commands" "$command" "dependencies" "")
+  if [ -n "$dependencies" ]; then
     echo "Installing dependencies for $command"
     for dependency in $dependencies; do
-      install_command $dependency
+      install_command "$dependency"
     done
   fi
+
   # Check if the command has a specific installer
   # If not, try to install with the available package managers
-  local installer=$(get_section_value "commands" $command "installer")
+  installer=$(get_section_value "commands" "$command" "installer")
+
   if [ -z "$installer" ]; then
-    for manager in "${available_package_managers[@]}"; do
+    for manager in $available_package_managers; do
       echo "Trying to install $command with $manager"
-      install_command_with_installer $command $manager && return
+      if install_command_with_installer "$command" "$manager"; then
+        return
+      fi
     done
   fi
-  install_command_with_installer $command $installer && return
+
+  # Try the specific installer if one exists
+  if install_command_with_installer "$command" "$installer"; then
+    return
+  fi
+
   echo "Failed to install $command with the available install options"
 }
 
 install_commands() {
-  for command in "${!commands[@]}"; do
-    if ! command_is_installed $command; then
-      echo -en "\e[31m$command\e[0m is not installed, "
+  commands=$commands_sections
+  for command in ${commands}; do
+    if ! command_is_installed "$command"; then
+      printf "\033[31m%s\033[0m is not installed, " "$command"
+      
       # Ask the user if they want to install the command
-      read -p "do you want to? [y/n] " answer
-      if [ $answer != "y" ]; then
+      printf "do you want to? [y/n] "
+      read answer
+
+      if [ "$answer" != "y" ]; then
         continue
       fi
-      install_command $command
+      
+      install_command "$command"
     else
-      echo -e "\e[32m$command\e[0m is already installed"
+      printf "\033[32m%s\033[0m is already installed\n" "$command"
     fi
   done
-}
-
-# Function to detect available package manager(s)
-detect_package_managers() {
-  local managers=("apt" "snap" "yum" "dnf" "pacman" "brew")
-
-  for manager in "${managers[@]}"; do
-    if command -v $manager &>/dev/null; then
-      # Extra check for apt (because some other bogus apt shows up sometimes on macOS)
-      if [ $manager == "apt" ] && [ ! -f "/etc/apt/sources.list" ]; then
-        continue
-      fi
-      available_package_managers+=($manager)
-    fi
-  done
-
-  if [ ${#available_package_managers[@]} -eq 0 ]; then
-    echo "No supported package manager found."
-  fi
 }
 
 detect_package_managers
 
-# Load the commands
-read_config $COMMANDS_FILE commands
-# output_config commands
+read_config "$COMMANDS_FILE" commands
 read_config "commands-package-map.cfg" commands_package_map
-# output_config commands_package_map
 
 install_commands
